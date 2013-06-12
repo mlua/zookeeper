@@ -45,7 +45,7 @@ then
   if [ -e "${ZOOKEEPER_PREFIX}/conf" ]; then
     ZOOCFGDIR="$ZOOBINDIR/../conf"
   else
-    ZOOCFGDIR="$ZOOBINDIR/../etc/zookeeper"
+    ZOOCFGDIR="/etc/zookeeper"
   fi
 fi
 
