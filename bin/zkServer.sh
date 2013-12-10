@@ -122,6 +122,7 @@ start)
          echo $command already running as process `cat "$ZOOPIDFILE"`.
          exit 0
       fi
+      rm -f "$ZOOPIDFILE"
     fi
     nohup "$JAVA" $ZOO_DATADIR_AUTOCREATE "-Dzookeeper.log.dir=${ZOO_LOG_DIR}" \
     "-Dzookeeper.root.logger=${ZOO_LOG4J_PROP}" \
