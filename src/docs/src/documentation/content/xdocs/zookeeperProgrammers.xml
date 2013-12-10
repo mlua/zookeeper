@@ -139,8 +139,7 @@
 
       <listitem>
         <para>The following characters are not allowed: \ud800 - uF8FF,
-        \uFFF0 - uFFFF, \uXFFFE - \uXFFFF (where X is a digit 1 - E), \uF0000 -
-        \uFFFFF.</para>
+        \uFFF0 - uFFFF.</para>
       </listitem>
 
       <listitem>
@@ -648,6 +647,37 @@
     may be missed: a watch for the existence of a znode not yet created will
     be missed if the znode is created and deleted while disconnected.</para>
 
+	<section id="sc_WatchSemantics">
+      <title>Semantics of Watches</title>
+	  
+	  <para> We can set watches with the three calls that read the state of 
+	  ZooKeeper: exists, getData, and getChildren. The following list details
+	  the events that a watch can trigger and the calls that enable them:
+	  </para>
+	  
+	  <itemizedlist>
+        <listitem>
+          <para><emphasis role="bold">Created event:</emphasis></para>
+          <para>Enabled with a call to exists.</para>
+        </listitem>
+        
+        <listitem>
+          <para><emphasis role="bold">Deleted event:</emphasis></para>
+          <para>Enabled with a call to exists, getData, and getChildren.</para>
+        </listitem>
+        
+        <listitem>
+          <para><emphasis role="bold">Changed event:</emphasis></para>
+          <para>Enabled with a call to exists and getData.</para>
+        </listitem>
+        
+        <listitem>
+          <para><emphasis role="bold">Child event:</emphasis></para>
+          <para>Enabled with a call to getChildren.</para>
+        </listitem>
+      </itemizedlist>
+	</section>
+	
     <section id="sc_WatchGuarantees">
       <title>What ZooKeeper Guarantees about Watches</title>
 

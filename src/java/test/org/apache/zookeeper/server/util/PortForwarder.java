@@ -36,6 +36,55 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * A utility that does bi-directional forwarding between two ports.
+ * Useful, for example, to simulate network failures.
+ * Example:
+ * 
+ *   Server 1 config file:
+ *           
+ *      server.1=127.0.0.1:7301:7401;8201
+ *      server.2=127.0.0.1:7302:7402;8202
+ *      server.3=127.0.0.1:7303:7403;8203
+ *   
+ *   Server 2 and 3 config files:
+ *           
+ *      server.1=127.0.0.1:8301:8401;8201
+ *      server.2=127.0.0.1:8302:8402;8202
+ *      server.3=127.0.0.1:8303:8403;8203
+ *
+ *   Initially forward traffic between 730x and 830x and between 740x and 830x
+ *   This way server 1 can communicate with servers 2 and 3
+ *  ....
+ *   
+ *   List<PortForwarder> pfs = startForwarding();
+ *  ....
+ *   // simulate a network interruption for server 1
+ *   stopForwarding(pfs);
+ *  ....
+ *   // restore connection 
+ *   pfs = startForwarding();
+ *
+ *
+ *  private List<PortForwarder> startForwarding() throws IOException {
+ *      List<PortForwarder> res = new ArrayList<PortForwarder>();
+ *      res.add(new PortForwarder(8301, 7301));
+ *      res.add(new PortForwarder(8401, 7401));
+ *      res.add(new PortForwarder(7302, 8302));
+ *      res.add(new PortForwarder(7402, 8402));
+ *      res.add(new PortForwarder(7303, 8303));
+ *      res.add(new PortForwarder(7403, 8403));
+ *      return res;
+ *  }
+ *  
+ *  private void stopForwarding(List<PortForwarder> pfs) throws Exception {
+ *       for (PortForwarder pf : pfs) {
+ *           pf.shutdown();
+ *       }
+ *  }
+ *  
+ *
+ */
 public class PortForwarder extends Thread {
     private static final Logger LOG = LoggerFactory
             .getLogger(PortForwarder.class);
@@ -162,24 +211,26 @@ public class PortForwarder extends Thread {
                             sock.getInputStream(), target.getOutputStream()));
                     this.workers.execute(new PortForwardWorker(target, sock,
                             target.getInputStream(), sock.getOutputStream()));
-                } catch (SocketTimeoutException e) {
-                    LOG.warn("socket timed out local:" + sock.getLocalPort()
-                            + " from:" + sock.getPort()
+                } catch (SocketTimeoutException e) {               	
+                    LOG.warn("socket timed out local:" 
+                            + (sock != null ? sock.getLocalPort(): "")
+                            + " from:" + (sock != null ? sock.getPort(): "")
                             + " to:" + to, e);
                 } catch (ConnectException e) {
-                    LOG.warn("connection exception local:" + sock.getLocalPort()
-                            + " from:" + sock.getPort()
+                    LOG.warn("connection exception local:"
+                            + (sock != null ? sock.getLocalPort(): "")
+                            + " from:" + (sock != null ? sock.getPort(): "")
                             + " to:" + to, e);
                     sock.close();
                 } catch (IOException e) {
                     if (!"Socket closed".equals(e.getMessage())) {
-                        LOG.warn("unexpected exception local:" + sock.getLocalPort()
-                            + " from:" + sock.getPort()
-                            + " to:" + to, e);
+                        LOG.warn("unexpected exception local:" 
+                        		+ (sock != null ? sock.getLocalPort(): "")
+                                + " from:" + (sock != null ? sock.getPort(): "")
+                                + " to:" + to, e);
                         throw e;
                     }
                 }
-
             }
         } catch (IOException e) {
             LOG.error("Unexpected exception to:" + to, e);

@@ -33,13 +33,12 @@ import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.AsyncCallback.DataCallback;
 import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 import org.apache.zookeeper.server.quorum.QuorumPeer.ServerState;
 import org.apache.zookeeper.server.quorum.flexible.QuorumHierarchical;
 import org.apache.zookeeper.server.quorum.flexible.QuorumMaj;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,22 +46,6 @@ import org.slf4j.LoggerFactory;
 public class ReconfigTest extends ZKTestCase implements DataCallback{
     private static final Logger LOG = LoggerFactory
             .getLogger(ReconfigTest.class);
-
-    private final QuorumBase qb = new QuorumBase();
-    private final ClientTest ct = new ClientTest();
-
-    @Before
-    public void setUp() throws Exception {
-        qb.setUp();
-        ct.hostPort = qb.hostPort;
-        ct.setUpAll();
-    }
-
-    @After
-    public void tearDown() throws Exception {
-        ct.tearDownAll();
-        qb.tearDown();
-    }
 
     private String reconfig(ZooKeeper zk, List<String> joiningServers,
             List<String> leavingServers, List<String> newMembers, long fromConfig)
@@ -627,6 +610,18 @@ public class ReconfigTest extends ZKTestCase implements DataCallback{
     }
 
     @Test
+    public void testUnspecifiedClientAddress() throws Exception {
+    	int[] ports = new int[3];
+    	for (int port : ports) {
+    		port = PortAssignment.unique();
+    	}
+    	String server = "server.0=localhost:" + ports[0] + ":" + ports[1] + ";" + ports[2];
+    	QuorumServer qs = new QuorumServer(0, server);
+    	Assert.assertEquals(qs.clientAddr.getHostName(), "0.0.0.0");
+    	Assert.assertEquals(qs.clientAddr.getPort(), ports[2]);
+    }
+    
+    @Test
     public void testQuorumSystemChange() throws Exception {
         QuorumUtil qu = new QuorumUtil(3); // create 7 servers
         qu.disableJMXTest = true;
@@ -646,7 +641,7 @@ public class ReconfigTest extends ZKTestCase implements DataCallback{
             members.add("server." + i + "=127.0.0.1:"
                     + qu.getPeer(i).peer.getQuorumAddress().getPort() + ":"
                     + qu.getPeer(i).peer.getElectionAddress().getPort() + ";"
-                    + qu.getPeer(i).peer.getClientPort());
+                    + "127.0.0.1:" + qu.getPeer(i).peer.getClientPort());
         }
 
         reconfig(zkArr[1], null, null, members, -1);
@@ -678,7 +673,7 @@ public class ReconfigTest extends ZKTestCase implements DataCallback{
             members.add("server." + i + "=127.0.0.1:"
                     + qu.getPeer(i).peer.getQuorumAddress().getPort() + ":"
                     + qu.getPeer(i).peer.getElectionAddress().getPort() + ";"
-                    + qu.getPeer(i).peer.getClientPort());
+                    + "127.0.0.1:" + qu.getPeer(i).peer.getClientPort());
         }
 
         reconfig(zkArr[1], null, null, members, -1);
@@ -700,5 +695,20 @@ public class ReconfigTest extends ZKTestCase implements DataCallback{
         }
 
         closeAllHandles(zkArr);
+    }
+    
+    @Test
+    public void testInitialConfigHasPositiveVersion() throws Exception {
+        QuorumUtil qu = new QuorumUtil(1); // create 3 servers
+        qu.disableJMXTest = true;
+        qu.startAll();
+        ZooKeeper[] zkArr = createHandles(qu);
+        testNormalOperation(zkArr[1], zkArr[2]);
+        for (int i=1; i<4; i++) {
+            String configStr = testServerHasConfig(zkArr[i], null, null);
+            QuorumVerifier qv = qu.getPeer(i).peer.configFromString(configStr);
+            long version = qv.getVersion();
+            Assert.assertTrue(version == 0x100000000L);
+        }
     }
 }

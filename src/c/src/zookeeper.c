@@ -417,6 +417,8 @@ static void destroy(zhandle_t *zh)
     destroy_zk_hashtable(zh->active_node_watchers);
     destroy_zk_hashtable(zh->active_exist_watchers);
     destroy_zk_hashtable(zh->active_child_watchers);
+    addrvec_free(&zh->addrs_old);
+    addrvec_free(&zh->addrs_new);
 }
 
 static void setup_random()
@@ -3841,6 +3843,9 @@ int flush_send_queue(zhandle_t*zh, int timeout)
     lock_buffer_list(&zh->to_send);
     while (zh->to_send.head != 0&& zh->state == ZOO_CONNECTED_STATE) {
         if(timeout!=0){
+#ifndef WIN32
+            struct pollfd fds;
+#endif
             int elapsed;
             struct timeval now;
             gettimeofday(&now,0);
@@ -3857,7 +3862,6 @@ int flush_send_queue(zhandle_t*zh, int timeout)
             // Poll the socket
             rc = select((int)(zh->fd)+1, NULL,  &pollSet, NULL, &wait);
 #else
-            struct pollfd fds;
             fds.fd = zh->fd;
             fds.events = POLLOUT;
             fds.revents = 0;

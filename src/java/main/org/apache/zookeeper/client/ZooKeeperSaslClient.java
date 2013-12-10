@@ -18,23 +18,11 @@
 
 package org.apache.zookeeper.client;
 
-import org.apache.zookeeper.AsyncCallback;
-import org.apache.zookeeper.ClientCnxn;
-import org.apache.zookeeper.Login;
-import org.apache.zookeeper.Watcher.Event.KeeperState;
-import org.apache.zookeeper.ZooDefs;
-import org.apache.zookeeper.Environment;
-import org.apache.zookeeper.data.Stat;
-import org.apache.zookeeper.proto.GetSASLRequest;
-import org.apache.zookeeper.proto.SetSASLResponse;
-import org.apache.zookeeper.server.auth.KerberosName;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.security.Principal;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
+
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -50,15 +38,49 @@ import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslClient;
 import javax.security.sasl.SaslException;
 
+import org.apache.zookeeper.AsyncCallback;
+import org.apache.zookeeper.ClientCnxn;
+import org.apache.zookeeper.Environment;
+import org.apache.zookeeper.Login;
+import org.apache.zookeeper.Watcher.Event.KeeperState;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.proto.GetSASLRequest;
+import org.apache.zookeeper.proto.SetSASLResponse;
+import org.apache.zookeeper.server.auth.KerberosName;
+import org.ietf.jgss.GSSContext;
+import org.ietf.jgss.GSSCredential;
+import org.ietf.jgss.GSSException;
+import org.ietf.jgss.GSSManager;
+import org.ietf.jgss.Oid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * This class manages SASL authentication for the client. It
  * allows ClientCnxn to authenticate using SASL with a Zookeeper server.
  */
 public class ZooKeeperSaslClient {
     public static final String LOGIN_CONTEXT_NAME_KEY = "zookeeper.sasl.clientconfig";
+    public static final String ENABLE_CLIENT_SASL_KEY = "zookeeper.sasl.client";
+    public static final String ENABLE_CLIENT_SASL_DEFAULT = "true";
+
+    /**
+     * Returns true if the SASL client is enabled. By default, the client
+     * is enabled but can be disabled by setting the system property
+     * <code>zookeeper.sasl.client</code> to <code>false</code>. See
+     * ZOOKEEPER-1657 for more information.
+     *
+     * @return If the SASL client is enabled.
+     */
+    public static boolean isEnabled() {
+        return Boolean.valueOf(System.getProperty(ENABLE_CLIENT_SASL_KEY, ENABLE_CLIENT_SASL_DEFAULT));
+    }
+
     private static final Logger LOG = LoggerFactory.getLogger(ZooKeeperSaslClient.class);
     private static Login login = null;
     private SaslClient saslClient;
+    private boolean isSASLConfigured = true;
 
     private byte[] saslToken = new byte[0];
 
@@ -92,12 +114,17 @@ public class ZooKeeperSaslClient {
         String clientSection = System.getProperty(ZooKeeperSaslClient.LOGIN_CONTEXT_NAME_KEY, "Client");
         // Note that 'Configuration' here refers to javax.security.auth.login.Configuration.
         AppConfigurationEntry entries[] = null;
-        SecurityException securityException = null;
+        RuntimeException runtimeException = null;
         try {
             entries = Configuration.getConfiguration().getAppConfigurationEntry(clientSection);
         } catch (SecurityException e) {
             // handle below: might be harmless if the user doesn't intend to use JAAS authentication.
-            securityException = e;
+            runtimeException = e;
+        } catch (IllegalArgumentException e) {
+            // third party customized getAppConfigurationEntry could throw IllegalArgumentException when JAAS
+            // configuration isn't set. We can reevaluate whether to catch RuntimeException instead when more 
+            // different types of RuntimeException found
+            runtimeException = e;
         }
         if (entries != null) {
             this.configStatus = "Will attempt to SASL-authenticate using Login Context section '" + clientSection + "'";
@@ -110,11 +137,11 @@ public class ZooKeeperSaslClient {
             if (explicitClientSection != null) {
                 // If the user explicitly overrides the default Login Context, they probably expected SASL to
                 // succeed. But if we got here, SASL failed.
-                if (securityException != null) {
+                if (runtimeException != null) {
                     throw new LoginException("Zookeeper client cannot authenticate using the " + explicitClientSection +
                             " section of the supplied JAAS configuration: '" +
                             System.getProperty(Environment.JAAS_CONF_KEY) + "' because of a " +
-                            "SecurityException: " + securityException);
+                            "RuntimeException: " + runtimeException);
                 } else {
                     throw new LoginException("Client cannot SASL-authenticate because the specified JAAS configuration " +
                             "section '" + explicitClientSection + "' could not be found.");
@@ -123,21 +150,22 @@ public class ZooKeeperSaslClient {
                 // The user did not override the default context. It might be that they just don't intend to use SASL,
                 // so log at INFO, not WARN, since they don't expect any SASL-related information.
                 String msg = "Will not attempt to authenticate using SASL ";
-                if (securityException != null) {
-                    msg += "(" + securityException.getLocalizedMessage() + ")";
+                if (runtimeException != null) {
+                    msg += "(" + runtimeException + ")";
                 } else {
                     msg += "(unknown error)";
                 }
                 this.configStatus = msg;
+                this.isSASLConfigured = false;
             }
             if (System.getProperty(Environment.JAAS_CONF_KEY)  != null) {
                 // Again, the user explicitly set something SASL-related, so they probably expected SASL to succeed.
-                if (securityException != null) {
+                if (runtimeException != null) {
                     throw new LoginException("Zookeeper client cannot authenticate using the '" +
                             System.getProperty(ZooKeeperSaslClient.LOGIN_CONTEXT_NAME_KEY, "Client") +
                             "' section of the supplied JAAS configuration: '" +
                             System.getProperty(Environment.JAAS_CONF_KEY) + "' because of a " +
-                            "SecurityException: " + securityException);
+                            "RuntimeException: " + runtimeException);
                 } else {
                     throw new LoginException("No JAAS configuration section named '" +
                             System.getProperty(ZooKeeperSaslClient.LOGIN_CONTEXT_NAME_KEY, "Client") +
@@ -147,7 +175,7 @@ public class ZooKeeperSaslClient {
             }
         }
     }
-
+    
     /**
      * @return informational message indicating the current configuration status.
      */
@@ -213,6 +241,33 @@ public class ZooKeeperSaslClient {
                 return saslClient;
             }
             else { // GSSAPI.
+            	boolean usingNativeJgss =
+            			Boolean.getBoolean("sun.security.jgss.native");
+            	if (usingNativeJgss) {
+            		// http://docs.oracle.com/javase/6/docs/technotes/guides/security/jgss/jgss-features.html
+            		// """
+            		// In addition, when performing operations as a particular
+            		// Subject, e.g. Subject.doAs(...) or Subject.doAsPrivileged(...),
+            		// the to-be-used GSSCredential should be added to Subject's
+            		// private credential set. Otherwise, the GSS operations will
+            		// fail since no credential is found.
+            		// """
+            		try {
+            			GSSManager manager = GSSManager.getInstance();
+            			Oid krb5Mechanism = new Oid("1.2.840.113554.1.2.2");
+            			GSSCredential cred = manager.createCredential(null,
+            					GSSContext.DEFAULT_LIFETIME,
+            					krb5Mechanism,
+            					GSSCredential.INITIATE_ONLY);
+            			subject.getPrivateCredentials().add(cred);
+            			if (LOG.isDebugEnabled()) {
+            				LOG.debug("Added private credential to subject: " + cred);
+            			}
+            		} catch (GSSException ex) {
+            			LOG.warn("Cannot add private credential to subject; " +
+            					"authentication at the server may fail", ex);
+            		}
+            	}
                 final Object[] principals = subject.getPrincipals().toArray();
                 // determine client principal from subject.
                 final Principal clientPrincipal = (Principal)principals[0];
@@ -237,7 +292,7 @@ public class ZooKeeperSaslClient {
                     return saslClient;
                 }
                 catch (Exception e) {
-                    LOG.error("Error creating SASL client:" + e);
+                	LOG.error("Exception while trying to create SASL client", e);
                     e.printStackTrace();
                     return null;
                 }
@@ -275,10 +330,10 @@ public class ZooKeeperSaslClient {
         if (saslClient.isComplete()) {
             // GSSAPI: server sends a final packet after authentication succeeds
             // or fails.
-            if ((serverToken == null) && (saslClient.getMechanismName() == "GSSAPI"))
+            if ((serverToken == null) && (saslClient.getMechanismName().equals("GSSAPI")))
                 gotLastPacket = true;
             // non-GSSAPI: no final packet from server.
-            if (saslClient.getMechanismName() != "GSSAPI") {
+            if (!saslClient.getMechanismName().equals("GSSAPI")) {
                 gotLastPacket = true;
             }
             // SASL authentication is completed, successfully or not:
@@ -480,6 +535,9 @@ public class ZooKeeperSaslClient {
     }
 
     public boolean clientTunneledAuthenticationInProgress() {
+    	if (!isSASLConfigured) {
+    	    return false;
+        } 
         // TODO: Rather than checking a disjunction here, should be a single member
         // variable or method in this class to determine whether the client is
         // configured to use SASL. (see also ZOOKEEPER-1455).

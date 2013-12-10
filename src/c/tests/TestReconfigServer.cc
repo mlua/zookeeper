@@ -16,6 +16,7 @@
  */
 #include <algorithm>
 #include <cppunit/extensions/HelperMacros.h>
+#include <unistd.h>
 #include "zookeeper.h"
 
 #include "Util.h"
@@ -153,7 +154,9 @@ testRemoveFollower() {
 
     // check if all the servers are listed in the config.
     parseConfig(buf, len, servers, version);
-    CPPUNIT_ASSERT_EQUAL(std::string("0"), version);
+    // initially should be 1<<32, which is 0x100000000. This is the zxid
+    // of the first NEWLEADER message, used as the initial version
+    CPPUNIT_ASSERT_EQUAL(std::string("100000000"), version);
     CPPUNIT_ASSERT_EQUAL(NUM_SERVERS, (uint32_t)(servers.size()));
     for (int i = 0; i < cluster_.size(); i++) {
         CPPUNIT_ASSERT(std::find(servers.begin(), servers.end(),
@@ -219,7 +222,9 @@ testNonIncremental() {
 
     // check if all the servers are listed in the config.
     parseConfig(buf, len, servers, version);
-    CPPUNIT_ASSERT_EQUAL(std::string("0"), version);
+    // initially should be 1<<32, which is 0x100000000. This is the zxid
+    // of the first NEWLEADER message, used as the initial version
+    CPPUNIT_ASSERT_EQUAL(std::string("100000000"), version);
     CPPUNIT_ASSERT_EQUAL(NUM_SERVERS, (uint32_t)(servers.size()));
     for (int i = 0; i < cluster_.size(); i++) {
         CPPUNIT_ASSERT(std::find(servers.begin(), servers.end(),

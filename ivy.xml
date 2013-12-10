@@ -27,8 +27,9 @@
 
   <configurations defaultconfmapping="default">
     <conf name="master"/>
-    <conf name="default"/>
+    <conf name="default" extends="optional"/>
     <conf name="test"/>
+    <conf name="optional"/> <!-- optional in generated pom -->
     <conf name="package" extends="master"/>
     <conf name="jdiff" visibility="private"/>
     <conf name="releaseaudit" visibility="private" description="Artifacts required for releaseaudit target"/>
@@ -39,15 +40,15 @@
   </publications>
 
   <dependencies>
-    <dependency org="org.slf4j" name="slf4j-api" rev="1.6.2"/>
-    <dependency org="org.slf4j" name="slf4j-log4j12" rev="1.6.2" transitive="false"/>
+    <dependency org="org.slf4j" name="slf4j-api" rev="1.7.5"/>
+    <dependency org="org.slf4j" name="slf4j-log4j12" rev="1.7.5" transitive="false"/>
     <dependency org="commons-cli" name="commons-cli" rev="1.2" />
   
     <!-- transitive false turns off dependency checking, log4j deps seem borked -->
     <dependency org="log4j" name="log4j" rev="1.2.16" transitive="false" conf="default"/>
-    <dependency org="jline" name="jline" rev="0.9.94" transitive="false" conf="default"/>
+    <dependency org="jline" name="jline" rev="2.11" transitive="false" conf="optional->default"/>
 
-    <dependency org="org.jboss.netty" name="netty" conf="default" rev="3.2.5.Final">
+    <dependency org="io.netty" name="netty" conf="default" rev="3.7.0.Final">
       <artifact name="netty" type="jar" conf="default"/>
     </dependency>
 

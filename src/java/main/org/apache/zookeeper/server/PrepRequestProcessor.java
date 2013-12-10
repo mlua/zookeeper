@@ -215,6 +215,25 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 if (cr != null) {
                     pendingChangeRecords.put(path, cr);
                 }
+
+                /*
+                 * ZOOKEEPER-1624 - We need to store for parent's ChangeRecord
+                 * of the parent node of a request. So that if this is a
+                 * sequential node creation request, rollbackPendingChanges()
+                 * can restore previous parent's ChangeRecord correctly.
+                 *
+                 * Otherwise, sequential node name generation will be incorrect
+                 * for a subsequent request.
+                 */
+                int lastSlash = path.lastIndexOf('/');
+                if (lastSlash == -1 || path.indexOf('\0') != -1) {
+                    continue;
+                }
+                String parentPath = path.substring(0, lastSlash);
+                ChangeRecord parentCr = getRecordForPath(parentPath);
+                if (parentCr != null) {
+                    pendingChangeRecords.put(parentPath, parentCr);
+                }
             } catch (KeeperException.NoNodeException e) {
                 // ignore this one
             }
@@ -349,11 +368,12 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
 
         switch (type) {
             case OpCode.create: {
-                zks.sessionTracker.checkSession(request.sessionId, request.getOwner());
                 CreateRequest createRequest = (CreateRequest)record;
                 if (deserialize) {
                     ByteBufferInputStream.byteBuffer2Record(request.request, createRequest);
                 }
+                CreateMode createMode = CreateMode.fromFlag(createRequest.getFlags());
+                validateCreateRequest(createMode, request);
                 String path = createRequest.getPath();
                 String parentPath = validatePathForCreate(path, request.sessionId);
 
@@ -365,7 +385,6 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
 
                 checkACL(zks, parentRecord.acl, ZooDefs.Perms.CREATE, request.authInfo);
                 int parentCVersion = parentRecord.stat.getCversion();
-                CreateMode createMode = CreateMode.fromFlag(createRequest.getFlags());
                 if (createMode.isSequential()) {
                     path = path + String.format(Locale.ENGLISH, "%010d", parentCVersion);
                 }
@@ -402,11 +421,12 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 break;
             }
             case OpCode.create2: {
-                zks.sessionTracker.checkSession(request.sessionId, request.getOwner());
                 Create2Request createRequest = (Create2Request)record;
                 if (deserialize) {
                     ByteBufferInputStream.byteBuffer2Record(request.request, createRequest);
                 }
+                CreateMode createMode = CreateMode.fromFlag(createRequest.getFlags());
+                validateCreateRequest(createMode, request);
                 String path = createRequest.getPath();
                 String parentPath = validatePathForCreate(path, request.sessionId);
 
@@ -418,7 +438,6 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
 
                 checkACL(zks, parentRecord.acl, ZooDefs.Perms.CREATE, request.authInfo);
                 int parentCVersion = parentRecord.stat.getCversion();
-                CreateMode createMode = CreateMode.fromFlag(createRequest.getFlags());
                 if (createMode.isSequential()) {
                     path = path + String.format(Locale.ENGLISH, "%010d", parentCVersion);
                 }
@@ -624,7 +643,13 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 int to = request.request.getInt();
                 request.setTxn(new CreateSessionTxn(to));
                 request.request.rewind();
-                zks.sessionTracker.addSession(request.sessionId, to);
+                if (request.isLocalSession()) {
+                    // This will add to local session tracker if it is enabled
+                    zks.sessionTracker.addSession(request.sessionId, to);
+                } else {
+                    // Explicitly add to global session if the flag is not set
+                    zks.sessionTracker.addGlobalSession(request.sessionId, to);
+                }
                 zks.setOwner(request.sessionId, request.getOwner());
                 break;
             case OpCode.closeSession:
@@ -791,7 +816,10 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
             //create/close session don't require request record
             case OpCode.createSession:
             case OpCode.closeSession:
-                pRequest2Txn(request.type, zks.getNextZxid(), request, null, true);
+                if (!request.isLocalSession()) {
+                    pRequest2Txn(request.type, zks.getNextZxid(), request,
+                                 null, true);
+                }
                 break;
 
             //All the rest don't need to create a Txn - just verify session
@@ -855,7 +883,22 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
         }
         return retval;
     }
-
+    
+    private void validateCreateRequest(CreateMode createMode, Request request)
+            throws KeeperException {
+        if (createMode.isEphemeral()) {
+            // Exception is set when local session failed to upgrade
+            // so we just need to report the error
+            if (request.getException() != null) {
+                throw request.getException();
+            }
+            zks.sessionTracker.checkGlobalSession(request.sessionId,
+                    request.getOwner());
+        } else {
+            zks.sessionTracker.checkSession(request.sessionId,
+                    request.getOwner());
+        }
+    }
 
     /**
      * This method checks out the acl making sure it isn't null or empty,

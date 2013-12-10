@@ -59,43 +59,6 @@ public class SaslAuthFailTest extends ClientBase {
             // could not create tmp directory to hold JAAS conf file.
         }
     }
-
-    private AtomicInteger authFailed = new AtomicInteger(0);
-    
-    @Override
-    protected TestableZooKeeper createClient(String hp)
-    throws IOException, InterruptedException
-    {
-        MyWatcher watcher = new MyWatcher();
-        return createClient(watcher, hp);
-    }
-
-    private class MyWatcher extends CountdownWatcher {
-        @Override
-        public synchronized void process(WatchedEvent event) {
-            if (event.getState() == KeeperState.AuthFailed) {
-                synchronized(authFailed) {
-                    authFailed.incrementAndGet();
-                    authFailed.notify();
-                }
-            }
-            else {
-                super.process(event);
-            }
-        }
-    }
-
-    @Test
-    public void testBadSaslAuthNotifiesWatch() throws Exception {
-        ZooKeeper zk = createClient();
-        // wait for authFailed event from client's EventThread.
-        synchronized(authFailed) {
-            authFailed.wait();
-        }
-        Assert.assertEquals(authFailed.get(),1);
-        zk.close();
-    }
-
     
     @Test
     public void testAuthFail() throws Exception {

@@ -182,10 +182,21 @@ void my_string_completion(int rc, const char *name, const void *data) {
       shutdownThisThing=1;
 }
 
+void my_string_completion_free_data(int rc, const char *name, const void *data) {
+    my_string_completion(rc, name, data);
+    free((void*)data);
+}
+
 void my_string_stat_completion(int rc, const char *name, const struct Stat *stat,
         const void *data)  {
     my_string_completion(rc, name, data);
     dumpStat(stat);
+}
+
+void my_string_stat_completion_free_data(int rc, const char *name,
+        const struct Stat *stat, const void *data)  {
+    my_string_stat_completion(rc, name, stat, data);
+    free((void*)data);
 }
 
 void my_data_completion(int rc, const char *value, int value_len,
@@ -362,9 +373,8 @@ void processline(char *line) {
             fprintf(stderr, "Error %d for %s\n", rc, line);
         }
    } else if (startsWith(line, "reconfig ")) {
-           line += 9;
            int syntaxError = 0;
-
+           char* p = NULL;
            char* joining = NULL;
            char* leaving = NULL;
            char* members = NULL;
@@ -373,8 +383,8 @@ void processline(char *line) {
            int mode = 0; // 0 = not set, 1 = incremental, 2 = non-incremental
            int64_t version = -1;
 
-           char *p = strtok (strdup(line)," ");
-
+           line += 9;
+           p = strtok (strdup(line)," ");
            while (p != NULL) {
                if (strcmp(p, "-add")==0) {
                    p = strtok (NULL," ");
@@ -401,13 +411,14 @@ void processline(char *line) {
                    mode = 2;
                    members = strdup(p);
                } else if (strcmp(p, "-file")==0){
+                   FILE *fp = NULL;
                    p = strtok (NULL," ");
                    if (mode == 1 || p == NULL) {
                        syntaxError = 1;
                        break;
                    }
                    mode = 2;
-                   FILE *fp = fopen(p, "r");
+                   fp = fopen(p, "r");
                    if (fp == NULL) {
                        fprintf(stderr, "Error reading file: %s\n", p);
                        syntaxError = 1;
@@ -444,7 +455,11 @@ void processline(char *line) {
                        syntaxError = 1;
                        break;
                    }
+#ifdef WIN32
+                   version = _strtoui64(p, NULL, 16);
+#else
                    version = strtoull(p, NULL, 16);
+#endif
                    if (version < 0) {
                        syntaxError = 1;
                        break;
@@ -540,10 +555,10 @@ void processline(char *line) {
 //        }
         if (is_create2) {
           rc = zoo_acreate2(zh, line, "new", 3, &ZOO_OPEN_ACL_UNSAFE, flags,
-                my_string_stat_completion, strdup(line));
+                my_string_stat_completion_free_data, strdup(line));
         } else {
           rc = zoo_acreate(zh, line, "new", 3, &ZOO_OPEN_ACL_UNSAFE, flags,
-                  my_string_completion, strdup(line));
+                my_string_completion_free_data, strdup(line));
         }
         if (rc) {
             fprintf(stderr, "Error %d for %s\n", rc, line);
@@ -568,7 +583,7 @@ void processline(char *line) {
             fprintf(stderr, "Path must start with /, found: %s\n", line);
             return;
         }
-        rc = zoo_async(zh, line, my_string_completion, strdup(line));
+        rc = zoo_async(zh, line, my_string_completion_free_data, strdup(line));
         if (rc) {
             fprintf(stderr, "Error %d for %s\n", rc, line);
         }

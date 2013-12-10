@@ -62,17 +62,21 @@ public class QuorumPeerConfig {
     protected int minSessionTimeout = -1;
     /** defaults to -1 if not set explicitly */
     protected int maxSessionTimeout = -1;
+    protected boolean localSessionsEnabled = false;
+    protected boolean localSessionsUpgradingEnabled = false;
 
     protected int initLimit;
     protected int syncLimit;
     protected int electionAlg = 3;
     protected int electionPort = 2182;
+    protected boolean quorumListenOnAllIPs = false;
 
     protected long serverId;
 
     protected QuorumVerifier quorumVerifier = null, lastSeenQuorumVerifier = null;
     protected int snapRetainCount = 3;
     protected int purgeInterval = 0;
+    protected boolean syncEnabled = true;
 
     protected LearnerType peerType = LearnerType.PARTICIPANT;
 
@@ -194,6 +198,10 @@ public class QuorumPeerConfig {
                 dataLogDir = vff.create(value);
             } else if (key.equals("clientPort")) {
                 clientPort = Integer.parseInt(value);
+            } else if (key.equals("localSessionsEnabled")) {
+                localSessionsEnabled = Boolean.parseBoolean(value);
+            } else if (key.equals("localSessionsUpgradingEnabled")) {
+                localSessionsUpgradingEnabled = Boolean.parseBoolean(value);
             } else if (key.equals("clientPortAddress")) {
                 clientPortAddress = value.trim();
             } else if (key.equals("tickTime")) {
@@ -210,6 +218,8 @@ public class QuorumPeerConfig {
                 syncLimit = Integer.parseInt(value);
             } else if (key.equals("electionAlg")) {
                 electionAlg = Integer.parseInt(value);
+            } else if (key.equals("quorumListenOnAllIPs")) {
+                quorumListenOnAllIPs = Boolean.parseBoolean(value);
             } else if (key.equals("peerType")) {
                 if (value.toLowerCase().equals("observer")) {
                     peerType = LearnerType.OBSERVER;
@@ -219,8 +229,10 @@ public class QuorumPeerConfig {
                 {
                     throw new ConfigException("Unrecognised peertype: " + value);
                 }
+            } else if (key.equals( "syncEnabled" )) {
+                syncEnabled = Boolean.parseBoolean(value);
             } else if (key.equals("dynamicConfigFile")){
-               dynamicConfigFileStr = value;
+                dynamicConfigFileStr = value;
             } else if (key.equals("autopurge.snapRetainCount")) {
                 snapRetainCount = Integer.parseInt(value);
             } else if (key.equals("autopurge.purgeInterval")) {
@@ -497,12 +509,16 @@ public class QuorumPeerConfig {
     public int getMaxClientCnxns() { return maxClientCnxns; }
     public int getMinSessionTimeout() { return minSessionTimeout; }
     public int getMaxSessionTimeout() { return maxSessionTimeout; }
+    public boolean areLocalSessionsEnabled() { return localSessionsEnabled; }
+    public boolean isLocalSessionsUpgradingEnabled() {
+        return localSessionsUpgradingEnabled;
+    }
 
     public int getInitLimit() { return initLimit; }
     public int getSyncLimit() { return syncLimit; }
     public int getElectionAlg() { return electionAlg; }
-    public int getElectionPort() { return electionPort; }    
-    
+    public int getElectionPort() { return electionPort; }
+
     public int getSnapRetainCount() {
         return snapRetainCount;
     }
@@ -510,8 +526,12 @@ public class QuorumPeerConfig {
     public int getPurgeInterval() {
         return purgeInterval;
     }
+    
+    public boolean getSyncEnabled() {
+        return syncEnabled;
+    }
 
-    public QuorumVerifier getQuorumVerifier() {   
+    public QuorumVerifier getQuorumVerifier() {
         return quorumVerifier;
     }
     
@@ -544,4 +564,8 @@ public class QuorumPeerConfig {
         return configBackwardCompatibilityMode;
     }
     
+    public Boolean getQuorumListenOnAllIPs() {
+        return quorumListenOnAllIPs;
+    }
+
 }

@@ -979,19 +979,21 @@ public class ClientCnxn {
 
             setName(getName().replaceAll("\\(.*\\)",
                     "(" + addr.getHostName() + ":" + addr.getPort() + ")"));
-            try {
-                zooKeeperSaslClient = new ZooKeeperSaslClient("zookeeper/"+addr.getHostName());
-            } catch (LoginException e) {
-                // An authentication error occurred when the SASL client tried to initialize:
-                // for Kerberos this means that the client failed to authenticate with the KDC.
-                // This is different from an authentication error that occurs during communication
-                // with the Zookeeper server, which is handled below.
-                LOG.warn("SASL configuration failed: " + e + " Will continue connection to Zookeeper server without "
-                  + "SASL authentication, if Zookeeper server allows it.");
-                eventThread.queueEvent(new WatchedEvent(
-                  Watcher.Event.EventType.None,
-                  Watcher.Event.KeeperState.AuthFailed, null));
-                saslLoginFailed = true;
+            if (ZooKeeperSaslClient.isEnabled()) {
+                try {
+                    zooKeeperSaslClient = new ZooKeeperSaslClient("zookeeper/"+addr.getHostName());
+                } catch (LoginException e) {
+                    // An authentication error occurred when the SASL client tried to initialize:
+                    // for Kerberos this means that the client failed to authenticate with the KDC.
+                    // This is different from an authentication error that occurs during communication
+                    // with the Zookeeper server, which is handled below.
+                    LOG.warn("SASL configuration failed: " + e + " Will continue connection to Zookeeper server without "
+                      + "SASL authentication, if Zookeeper server allows it.");
+                    eventThread.queueEvent(new WatchedEvent(
+                      Watcher.Event.EventType.None,
+                      Watcher.Event.KeeperState.AuthFailed, null));
+                    saslLoginFailed = true;
+                }
             }
             logStartConnect(addr);
 
@@ -1016,6 +1018,7 @@ public class ClientCnxn {
             clientCnxnSocket.updateLastSendAndHeard();
             int to;
             long lastPingRwServer = System.currentTimeMillis();
+            final int MAX_SEND_PING_INTERVAL = 10000; //10 seconds
             while (state.isAlive()) {
                 try {
                     if (!clientCnxnSocket.isConnected()) {
@@ -1072,9 +1075,12 @@ public class ClientCnxn {
                                         + Long.toHexString(sessionId));
                     }
                     if (state.isConnected()) {
-                        int timeToNextPing = readTimeout / 2
-                                - clientCnxnSocket.getIdleSend();
-                        if (timeToNextPing <= 0) {
+                    	//1000(1 second) is to prevent race condition missing to send the second ping
+                    	//also make sure not to send too many pings when readTimeout is small 
+                        int timeToNextPing = readTimeout / 2 - clientCnxnSocket.getIdleSend() - 
+                        		((clientCnxnSocket.getIdleSend() > 1000) ? 1000 : 0);
+                        //send a ping request either time is due or no packet sent out within MAX_SEND_PING_INTERVAL
+                        if (timeToNextPing <= 0 || clientCnxnSocket.getIdleSend() > MAX_SEND_PING_INTERVAL) {
                             sendPing();
                             clientCnxnSocket.updateLastSend();
                         } else {
@@ -1155,25 +1161,40 @@ public class ClientCnxn {
             LOG.info("Checking server " + addr + " for being r/w." +
                     " Timeout " + pingRwTimeout);
 
+            Socket sock = null;
+            BufferedReader br = null;
             try {
-                Socket sock = new Socket(addr.getHostName(), addr.getPort());
+                sock = new Socket(addr.getHostName(), addr.getPort());
                 sock.setSoLinger(false, -1);
                 sock.setSoTimeout(1000);
                 sock.setTcpNoDelay(true);
                 sock.getOutputStream().write("isro".getBytes());
                 sock.getOutputStream().flush();
                 sock.shutdownOutput();
-                BufferedReader br = new BufferedReader(
+                br = new BufferedReader(
                         new InputStreamReader(sock.getInputStream()));
                 result = br.readLine();
-                sock.close();
-                br.close();
             } catch (ConnectException e) {
                 // ignore, this just means server is not up
             } catch (IOException e) {
                 // some unexpected error, warn about it
                 LOG.warn("Exception while seeking for r/w server " +
                         e.getMessage(), e);
+            } finally {
+                if (sock != null) {
+                    try {
+                        sock.close();
+                    } catch (IOException e) {
+                        LOG.warn("Unexpected exception", e);
+                    }
+                }
+                if (br != null) {
+                    try {
+                        br.close();
+                    } catch (IOException e) {
+                        LOG.warn("Unexpected exception", e);
+                    }
+                }
             }
 
             if ("rw".equals(result)) {
@@ -1259,18 +1280,23 @@ public class ClientCnxn {
         }
 
         public boolean clientTunneledAuthenticationInProgress() {
-            // 1. SASL login failed.
+            // 1. SASL client is disabled.
+            if (!ZooKeeperSaslClient.isEnabled()) {
+                return false;
+            }
+
+            // 2. SASL login failed.
             if (saslLoginFailed == true) {
                 return false;
             }
 
-            // 2. SendThread has not created the authenticating object yet,
+            // 3. SendThread has not created the authenticating object yet,
             // therefore authentication is (at the earliest stage of being) in progress.
             if (zooKeeperSaslClient == null) {
                 return true;
             }
 
-            // 3. authenticating object exists, so ask it for its progress.
+            // 4. authenticating object exists, so ask it for its progress.
             return zooKeeperSaslClient.clientTunneledAuthenticationInProgress();
         }
 
